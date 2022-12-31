@@ -11,3 +11,5 @@ serde= {version="1.0.152", features=["derive"]}
 env_logger="0.10.0"
 log="0.4.17"
 derive_more = "0.99"
+sqlx= { version = "0.6", features = [ "runtime-actix-native-tls" , "postgres" ] }
+dotenv="0.15.0"
