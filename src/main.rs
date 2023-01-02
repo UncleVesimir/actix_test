@@ -1,37 +1,40 @@
-use actix_web::{guard, middleware::Logger, web, web::Data, App, HttpServer};
-use dotenv::dotenv;
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
-use std::sync::Mutex;
-
 mod common;
 mod db_error;
 mod services;
+mod auth;
+mod db;
 
-use common::AppStateWithCounter;
+use auth::auth::get_basic_auth_client;
+use actix_web::{cookie::Key, guard, middleware::Logger, web, web::Data, App, HttpServer};
+use actix_session::{SessionMiddleware, Session, storage::CookieSessionStore};
+use db::db::get_pool;
+use dotenv::dotenv;
+use oauth2::basic::BasicClient;
 use services::{echo, get_user, hello, manual_hello, new_user, ping};
+use sqlx::{Pool, Postgres};
 
 pub struct AppState {
     db: Pool<Postgres>,
+    oauth: BasicClient,
 }
+
+
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set in .env");
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?
-        .expect("Error building a db connection pool");
-
     std::env::set_var("RUST_LOG", "info");
     std::env::set_var("RUST_BACKTRACE", "1");
     env_logger::init();
+    let pool = get_pool().await;
+    let basic_client = get_basic_auth_client();
+    let secret_key = Key::generate();
 
     HttpServer::new(move || {
         let logger = Logger::default();
         let scope = web::scope("")
             .guard(guard::Header("Host", "localhost:8080"))
+            //authmiddleware here
             .service(hello)
             .service(echo)
             .service(ping)
@@ -41,7 +44,8 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(logger)
-            .app_data(Data::new(AppState { db: pool.clone() }))
+            .wrap(SessionMiddleware::new(CookieSessionStore::default(), secret_key.clone()))
+            .app_data(Data::new(AppState { db: pool.clone(), oauth: basic_client.clone() }))
             .service(scope)
     })
     .bind(("127.0.0.1", 8080))?
